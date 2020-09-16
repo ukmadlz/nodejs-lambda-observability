@@ -1,0 +1,194 @@
+# Welcome to Serverless!
+#
+# This file is the main config file for your service.
+# It's very minimal at this point and uses default values.
+# You can always add more config options for more control.
+# We've included some commented out config examples here.
+# Just uncomment any of them to get that config option.
+#
+# For full config options, check the docs:
+#    docs.serverless.com
+#
+# Happy Coding!
+
+service: nodejslambdaobservability
+# app and org for use with dashboard.serverless.com
+#app: your-app-name
+#org: your-org-name
+
+# You can pin your service to only deploy with a specific Serverless version
+# Check out our docs for more details
+frameworkVersion: '2'
+
+provider:
+  name: aws
+  runtime: nodejs12.x
+
+# you can overwrite defaults here
+#  stage: dev
+#  region: us-east-1
+
+# you can add statements to the Lambda function's IAM Role here
+  iamRoleStatements:
+    - Effect: Allow
+      Action:
+        - s3:*
+      Resource: "arn:aws:s3:::${self:custom.bucketName}/*"
+
+  s3:
+    gifBucket:
+      name: ${self:custom.bucketName}
+      versioningConfiguration:
+        Status: Enabled
+
+# you can define service wide environment variables here
+#  environment:
+#    variable1: value1
+
+# you can add packaging information here
+#package:
+#  include:
+#    - include-me.js
+#    - include-me-dir/**
+#  exclude:
+#    - exclude-me.js
+#    - exclude-me-dir/**
+
+custom:
+  bucketName: gifs-${self:service}-${self:provider.region}-${self:provider.stage}
+
+functions:
+  hello:
+    handler: handler.hello
+    environment:
+      GIPHY_API: ${ssm:GIPHY_API}
+      ACCOUNT_TOKEN: ${ssm:LOGZIO_SHIPPING_TOKEN}
+      LISTENER: ${ssm:LOGZIO_LISTENER}
+      BUCKET: ${self:custom.bucketName}
+    events:
+      - schedule: rate(5 minutes)
+  postprocess:
+    handler: handler.postprocess
+    environment:
+      ACCOUNT_TOKEN: ${ssm:LOGZIO_SHIPPING_TOKEN}
+      LISTENER: ${ssm:LOGZIO_LISTENER}
+      BUCKET: ${self:custom.bucketName}
+    events:
+      - s3:
+          bucket: ${self:custom.bucketName}
+          event: s3:ObjectCreated:*
+          existing: true
+          rules:
+            - prefix: original
+
+# you can add CloudFormation resource templates here
+resources:
+  Resources:
+    Cluster:
+      Type: AWS::ECS::Cluster
+      Properties:
+        ClusterName: deployment-example-cluster
+    LogGroup:
+      Type: AWS::Logs::LogGroup
+      Properties:
+        LogGroupName: deployment-example-log-group
+    ExecutionRole:
+      Type: AWS::IAM::Role
+      Properties:
+        RoleName: deployment-example-role
+        AssumeRolePolicyDocument:
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service: ecs-tasks.amazonaws.com
+              Action: sts:AssumeRole
+        ManagedPolicyArns:
+          - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+          - arn:aws:iam::aws:policy/AmazonEC2FullAccess
+          - arn:aws:iam::aws:policy/AmazonECS_FullAccess
+    ContainerSecurityGroup:
+      Type: AWS::EC2::SecurityGroup
+      Properties:
+        GroupName: CollectorContainerSecurityGroup
+        GroupDescription: Security group for Collector containers
+        SecurityGroupIngress:
+          - IpProtocol: tcp
+            FromPort: 14268
+            ToPort: 14268
+            CidrIp: 0.0.0.0/0
+          - IpProtocol: tcp
+            FromPort: 9411
+            ToPort: 9411
+            CidrIp: 0.0.0.0/0
+          - IpProtocol: tcp
+            FromPort: 14269
+            ToPort: 14269
+            CidrIp: 0.0.0.0/0
+          - IpProtocol: tcp
+            FromPort: 14250
+            ToPort: 14250
+            CidrIp: 0.0.0.0/0
+    TaskDefinition:
+      Type: AWS::ECS::TaskDefinition
+      Properties:
+        Family: deployment-collector-task
+        Cpu: 256
+        Memory: 512
+        NetworkMode: awsvpc
+        ExecutionRoleArn: !Ref ExecutionRole
+        ContainerDefinitions:
+          - Name: deployment-example-metrics-collector
+            Image: logzio/docker-collector-metrics
+            Environment:
+              - Name: LOGZIO_TOKEN
+                Value: ${ssm:LOGZIO_METRICS_TOKEN}
+              - Name: LOGZIO_MODULES
+                Value: aws
+              - Name: AWS_REGION
+                Value: ${self:provider.region}
+              - Name: AWS_NAMESPACES
+                Value: "AWS/Lambda,AWS/S3"
+              - Name: AWS_ACCESS_KEY
+                Value: ${ssm:METRICS_AWS_ACCESS_KEY}
+              - Name: AWS_SECRET_KEY
+                Value: ${ssm:METRICS_AWS_SECRET_KEY}
+            LogConfiguration:
+              LogDriver: awslogs
+              Options:
+                awslogs-region: !Ref AWS::Region
+                awslogs-group: !Ref LogGroup
+                awslogs-stream-prefix: ecs
+          - Name: deployment-example-traces-collector
+            Image: logzio/jaeger-logzio-collector
+            PortMappings:
+              - ContainerPort: 14268
+              - ContainerPort: 9411
+              - ContainerPort: 14269
+              - ContainerPort: 14250
+            Environment:
+              - Name: ACCOUNT_TOKEN
+                Value: ${ssm:LOGZIO_TRACING_TOKEN}
+            LogConfiguration:
+              LogDriver: awslogs
+              Options:
+                awslogs-region: !Ref AWS::Region
+                awslogs-group: !Ref LogGroup
+                awslogs-stream-prefix: ecs
+        RequiresCompatibilities:
+          - EC2
+          - FARGATE
+    Service:
+      Type: AWS::ECS::Service
+      Properties:
+        ServiceName: deployment-example-service
+        Cluster: !Ref Cluster
+        TaskDefinition: !Ref TaskDefinition
+        DesiredCount: 1
+        LaunchType: FARGATE
+        NetworkConfiguration:
+          AwsvpcConfiguration:
+            AssignPublicIp: ENABLED
+            Subnets:
+              - ${ssm:METRICS_SUBNET}
+            SecurityGroups:
+              - !GetAtt ContainerSecurityGroup.GroupId

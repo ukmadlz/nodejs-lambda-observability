@@ -1,0 +1,26 @@
+{
+  "name": "nodejs-lambda-observability",
+  "version": "1.0.0",
+  "description": "",
+  "main": "handler.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ukmadlz/nodejs-lambda-observability.git"
+  },
+  "author": "Mike Elsmore <mike.elsmore@logz.io>",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/ukmadlz/nodejs-lambda-observability/issues"
+  },
+  "homepage": "https://github.com/ukmadlz/nodejs-lambda-observability#readme",
+  "dependencies": {
+    "aws-sdk": "^2.753.0",
+    "axios": "^0.20.0",
+    "sharp": "^0.26.0",
+    "winston": "^3.3.3",
+    "winston-logzio": "^5.1.2"
+  }
+}
