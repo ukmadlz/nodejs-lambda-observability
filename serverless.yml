@@ -159,7 +159,7 @@ resources:
                 awslogs-group: !Ref LogGroup
                 awslogs-stream-prefix: ecs
           - Name: deployment-example-traces-collector
-            Image: logzio/jaeger-logzio-collector
+            Image: logzio/jaeger-logzio-collector:latest
             PortMappings:
               - ContainerPort: 14268
               - ContainerPort: 9411
@@ -167,6 +167,8 @@ resources:
               - ContainerPort: 14250
             Environment:
               - Name: ACCOUNT_TOKEN
+                Value: ${ssm:LOGZIO_TRACING_TOKEN}
+              - Name: AccountToken
                 Value: ${ssm:LOGZIO_TRACING_TOKEN}
             LogConfiguration:
               LogDriver: awslogs

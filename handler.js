@@ -5,6 +5,7 @@ const Axios = require('axios').default;
 const Sharp = require('sharp');
 const winston = require('winston');
 const LogzioWinstonTransport = require('winston-logzio');
+const Package = require('./package.json');
 
 const axios = Axios.create({
   baseURL: 'https://api.giphy.com'
@@ -13,6 +14,7 @@ const axios = Axios.create({
 // Logger
 const logzioWinstonTransport = new LogzioWinstonTransport({
   name: 'winston_logzio',
+  type: `${Package.name}-${Package.version}`,
   token: process.env.ACCOUNT_TOKEN,
   host: `${process.env.LISTENER}:5015`,
   level: 'info'
@@ -107,51 +109,68 @@ module.exports.hello = async event => {
 
 // Create static thumbnails
 module.exports.postprocess = async event => {
-  return await Promise.all(event.Records.map(async record => {
-    try {
-      const originalFilename = record.s3.object.key;
-      const Bucket = process.env.BUCKET;
-      logger.info({
-        task: 'resizing',
-        image: originalFilename,
-      });
+  try {
+    return await Promise.all(event.Records.map(async record => {
+      try {
+        const originalFilename = record.s3.object.key;
+        const Bucket = process.env.BUCKET;
+        logger.info({
+          task: 'resizing',
+          image: originalFilename,
+        });
 
-      logger.debug({
-        task: 'Get original from S3',
-        originalFilename
-      });
-      const original = await S3.getObject({
-        Bucket,
-        Key: originalFilename,
-      }).promise();
+        logger.debug({
+          task: 'Get original from S3',
+          originalFilename
+        });
+        const original = await S3.getObject({
+          Bucket,
+          Key: originalFilename,
+        }).promise();
 
-      logger.debug({
-        task: 'Resize Original to Thumbnail',
-      });
-      const thumbnail = await Sharp(original.Body)
-        .resize(100)
-        .toBuffer();
-      logger.debug({
-        resized: originalFilename,
-        thumbnail,
-      });
+        logger.debug({
+          task: 'Resize Original to Thumbnail',
+        });
+        const thumbnail = await Sharp(original.Body)
+          .resize(100)
+          .toBuffer();
+        logger.debug({
+          resized: originalFilename,
+          thumbnail,
+        });
 
-      const thumbnailFilename = originalFilename.replace('original', 'thumbnail');
-      logger.debug({
-        task: 'send thumbnail to S3',
-        image: thumbnailFilename,
-      });
-      return await S3.putObject({
-        Bucket,
-        Key: thumbnailFilename,
-        Body: thumbnail,
-      }).promise();
-    } catch (error) {
-      logger.error({
-        message: error.message,
-        stack: error.stack,
-      });
-      return false;
+        const thumbnailFilename = originalFilename.replace('original', 'thumbnail');
+        logger.debug({
+          task: 'send thumbnail to S3',
+          image: thumbnailFilename,
+        });
+        return await S3.putObject({
+          Bucket,
+          Key: thumbnailFilename,
+          Body: thumbnail,
+        }).promise();
+      } catch (error) {
+        logger.error({
+          message: error.message,
+          stack: error.stack,
+        });
+        return error;
+      }
+    }));
+  } catch (error) {
+    logger.error({
+      message: error.message,
+      stack: error.stack,
+    });
+    return {
+      statusCode: 500,
+      body: JSON.stringify({
+        message: 'Failed to resize thumbnails',
+        error,
+      },
+      null,
+      2,
+      ),
     }
-  }));
+  }
 }
